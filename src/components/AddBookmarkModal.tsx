@@ -36,13 +36,13 @@ export default function AddBookmarkModal({ onClose, onSuccess }: AddBookmarkModa
       });
 
       if (error) throw error;
-      
-      onClose();
-      
-      // Trigger refresh in parent component
+
+      // Trigger refresh in parent to ensure full list is shown
       if (onSuccess) {
         onSuccess();
       }
+
+      onClose();
     } catch (error) {
       console.error('Error adding bookmark:', error);
       alert('Failed to add bookmark. Please try again.');
