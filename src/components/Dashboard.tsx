@@ -11,48 +11,6 @@ export default function Dashboard() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
-  useEffect(() => {
-  fetchBookmarks();
-
-  console.log('Setting up Realtime subscription for user:', user?.id);
-
-  const channel = supabase
-    .channel('bookmarks-changes')
-    .on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'bookmarks',
-        filter: `user_id=eq.${user?.id}`,
-      },
-      (payload) => {
-        console.log('🔥 Realtime event received:', payload);
-        
-        if (payload.eventType === 'INSERT') {
-          console.log('➕ Adding new bookmark:', payload.new);
-          setBookmarks((current) => [payload.new as BookmarkType, ...current]);
-        } else if (payload.eventType === 'DELETE') {
-          console.log('🗑️ Deleting bookmark:', payload.old.id);
-          setBookmarks((current) => current.filter((b) => b.id !== payload.old.id));
-        } else if (payload.eventType === 'UPDATE') {
-          console.log('✏️ Updating bookmark:', payload.new);
-          setBookmarks((current) =>
-            current.map((b) => (b.id === payload.new.id ? (payload.new as BookmarkType) : b))
-          );
-        }
-      }
-    )
-    .subscribe((status) => {
-      console.log('📡 Realtime subscription status:', status);
-    });
-
-  return () => {
-    console.log('Cleaning up Realtime subscription');
-    supabase.removeChannel(channel);
-  };
-}, [user?.id]);
-
   const fetchBookmarks = async () => {
     try {
       const { data, error } = await supabase
@@ -69,24 +27,69 @@ export default function Dashboard() {
     }
   };
 
-const deleteBookmark = async (id: string) => {
-  try {
-    // Optimistically update UI immediately
-    setBookmarks((current) => current.filter((b) => b.id !== id));
-    
-    // Then delete from database
-    const { error } = await supabase.from('bookmarks').delete().eq('id', id);
-    
-    if (error) {
-      // If delete failed, revert by refetching
-      fetchBookmarks();
-      throw error;
+  useEffect(() => {
+    fetchBookmarks();
+
+    console.log('Setting up Realtime subscription for user:', user?.id);
+
+    const channel = supabase
+      .channel('bookmarks-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'bookmarks',
+          filter: `user_id=eq.${user?.id}`,
+        },
+        (payload) => {
+          console.log('🔥 Realtime event received:', payload);
+
+          if (payload.eventType === 'INSERT') {
+            console.log('➕ Adding new bookmark:', payload.new);
+            setBookmarks((current) => {
+              // Avoid duplicates if bookmark was already added optimistically
+              if (current.some((b) => b.id === (payload.new as BookmarkType).id)) return current;
+              return [payload.new as BookmarkType, ...current];
+            });
+          } else if (payload.eventType === 'DELETE') {
+            console.log('🗑️ Deleting bookmark:', payload.old.id);
+            setBookmarks((current) => current.filter((b) => b.id !== payload.old.id));
+          } else if (payload.eventType === 'UPDATE') {
+            console.log('✏️ Updating bookmark:', payload.new);
+            setBookmarks((current) =>
+              current.map((b) => (b.id === payload.new.id ? (payload.new as BookmarkType) : b))
+            );
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log('📡 Realtime subscription status:', status);
+      });
+
+    return () => {
+      console.log('Cleaning up Realtime subscription');
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
+
+  const deleteBookmark = async (id: string) => {
+    try {
+      // Optimistically update UI immediately
+      setBookmarks((current) => current.filter((b) => b.id !== id));
+
+      const { error } = await supabase.from('bookmarks').delete().eq('id', id);
+
+      if (error) {
+        // If delete failed, revert by refetching
+        fetchBookmarks();
+        throw error;
+      }
+    } catch (error) {
+      console.error('Error deleting bookmark:', error);
+      alert('Failed to delete bookmark');
     }
-  } catch (error) {
-    console.error('Error deleting bookmark:', error);
-    alert('Failed to delete bookmark');
-  }
-};
+  };
 
   const filteredBookmarks = bookmarks.filter(
     (bookmark) =>
@@ -223,7 +226,12 @@ const deleteBookmark = async (id: string) => {
         )}
       </main>
 
-      {showAddModal && <AddBookmarkModal onClose={() => setShowAddModal(false)} />}
+      {showAddModal && (
+        <AddBookmarkModal
+          onClose={() => setShowAddModal(false)}
+          onSuccess={fetchBookmarks}
+        />
+      )}
     </div>
   );
 }
